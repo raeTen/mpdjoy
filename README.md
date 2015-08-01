@@ -64,7 +64,7 @@ otherwise there might be problems accessing the input device
 on several platforms.
 Running passing -d(aemon) will let it fork to background with 
 given userid/groupid rights. Running in background without
-given userid will not work at all. As we all now, never
+given userid will not work at all. As we all know, never
 run it as root.
 
 ## Hint
