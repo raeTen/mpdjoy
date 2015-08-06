@@ -2,18 +2,12 @@
 
 ## About
 mpdjoy controls your MPD-host by any linux driven joystick/pad.
+0.9.2 is alphastate for now, should do what I wanted
 
 It's just a small etude to tinker around libmpd and to improve
 my daemon skel, but you might find it usefull anyway.
 e.g. how to evaluate joysticks the more native way
 
-You'll need a loaded playlist for now. Use any mpdclient
-like the good mpc for that.
-
-## Future improvements
-Handling of playlists (next/prev)
-Handling of "repeat"-flags
-Dynamic joystik device polling
 
 ## Install
 mpdjoy should compile smoothly by doing a
@@ -24,7 +18,8 @@ additionally needed libraries: libconfig and libmpdclient
 
 ## Compiling issues
 If the compiler complains about int/long int within config_setting_lookup_int,
-change the 3 marked lines to what your system libconfig treats.
+re-comment out/in the 3 marked lines to what your system libconfig treats.
+see line 201 276 300
 
 ## Why
 I just wanted to have buttons for my fingers to handle mpd - music
@@ -64,7 +59,7 @@ otherwise there might be problems accessing the input device
 on several platforms.
 Running passing -d(aemon) will let it fork to background with 
 given userid/groupid rights. Running in background without
-given userid will not work at all. As we all know, never
+given userid will not work at all. As we all now, never
 run it as root.
 
 ## Hint
