@@ -14,8 +14,9 @@
 /*  0.9.1						*/
 /*  optimized cpu usage and 				*/
 /*  less socket traffic 				*/
-/*  0.9.2 supports playlists next/prevr			*/
+/*  0.9.2 supports playlists next/prev 			*/
 /* 							*/
+/*------------------------------------------------------*/
 /*------------------------------------------------------*/
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,12 +44,12 @@
 #define MPD_TIMEOUT 2000
 #define DEADZONE 1
 #define BUTTONZONE 10
-/** volume control----------------------------------*/
+/** volume control----------------*/
 #define FIXED true 
 #define DYNAMIC false
 
 #define IDLE 300
-/** milliseconds | timer to poll input device driver*/
+/** milliseconds | timer to poll input device driver----*/
 #define POLL 40 
 /* lower values will occupy cpu more often, "80" is a good value for nowadays SoCs */
 
@@ -138,7 +139,7 @@ bool			daemonize = false;
 bool			running = true;
 bool			isconnected = false;
 bool            forcePlaying = false;
-
+bool            useServerlist = false;
 void handle_signal( int i ) 
 {
   running = false;
@@ -171,7 +172,7 @@ void dolog(int level, const char *fmt, ...)
   logging(level, fmt, ap);
   va_end(ap);
 }
-/** ***********************************************************/
+/** */
 void setsignal( void ) 
 {
   signal(SIGHUP,  &handle_signal);
@@ -198,8 +199,8 @@ static int readconf() {
   char lbuffer[MAX_CA_LEN];
   //there were changes in libconfig, so change this (and both lines downwards)
   //according to what libconfig.h treats within config_setting_lookup_int()
-  long int number;
-  ///int number;
+  ///long int number;
+  int number;
   config_init( &cfg );
   if ( ! config_read_file( &cfg, configfile) )
   {
@@ -238,7 +239,7 @@ static int readconf() {
     daemongroup = 0;
   
   /** Known PLaylists */
-  /* Output a list of all configured buttons */
+  /* Output a list of all configured playlists */
   setting = config_lookup(&cfg, "knownPlaylists");
   if( setting != NULL )
   {
@@ -255,7 +256,7 @@ static int readconf() {
       knownPlaylists[userplaylists].norepeat = false;
       userplaylists++; 
     }
-    //userplaylists--;
+
   }
   /** Buttons config */
   /* Output a list of all configured buttons */
@@ -273,8 +274,8 @@ static int readconf() {
            && config_setting_lookup_int( cbutton, "nr", &number) ) )
         continue;
       /*NOTE int or long int */
-      if ( DEBUG ) printf( "%-30s  %3ld\n", c_value, number ); //number is long int
-      ///if ( DEBUG ) printf( "%-30s  %3d\n", c_value, number );     //number is int
+      ///if ( DEBUG ) printf( "%-30s  %3ld\n", c_value, number ); //number is long int
+      if ( DEBUG ) printf( "%-30s  %3d\n", c_value, number );     //number is int
       snprintf( lbuffer, MAX_CA_LEN, "%s", c_value );
       strcpy( jsbuttons[i].cfg_value, lbuffer );
       jsbuttons[i].number = number;
@@ -297,8 +298,8 @@ static int readconf() {
                     && config_setting_lookup_int( caxis, "nr",  &number) ) )
         continue;
       /*NOTE int or long int */
-      if ( DEBUG ) printf( "%-30s  %3ld\n", c_value, number ); //number is long int
-      ///if ( DEBUG ) printf( "%-30s  %3d\n", c_value, number );     //number is int
+      ///if ( DEBUG ) printf( "%-30s  %3ld\n", c_value, number ); //number is long int
+      if ( DEBUG ) printf( "%-30s  %3d\n", c_value, number );     //number is int
       snprintf( lbuffer, MAX_CA_LEN, "%s", c_value );
       strcpy( jsaxis[i].cfg_value, lbuffer );
       jsaxis[i].number = number;
@@ -492,7 +493,7 @@ int checkPlaylists ( void )
       case 0:
           /*use Playlists from mpd host*/
       case 1:
-          get_host_playlists();
+          useServerlist = get_host_playlists();
           break;
       default:
           /*using the knownPlaylists from config*/
@@ -533,7 +534,7 @@ int loadPlaylist( int actstate )
 
 void nextpreviousPlaylist( int step )
 {
-    /*TODO update knownPlaylists if taken from host */
+    if ( useServerlist) get_host_playlists();
     actPlaylist = actPlaylist + (step);
     if (actPlaylist < 0 ) actPlaylist = userplaylists;
     if (actPlaylist > userplaylists) actPlaylist = 0;
@@ -801,8 +802,9 @@ int button_action( int button )
         mpd_functions( simplehash( jsbuttons[cnt].cfg_value), BUTTONZONE );
       
         if ( ( strstr( jsbuttons[cnt].cfg_value, "next" ) ) || 
-             ( strstr( jsbuttons[cnt].cfg_value, "prev" ) ) )
-          /*repeat with decay on nextprev* */
+             ( strstr( jsbuttons[cnt].cfg_value, "prev" ) ) ||
+             ( strstr( jsbuttons[cnt].cfg_value, "pause" ) ) )
+          /*repeat with decay*/
           jsbuttons[cnt].norepeat = (int)time(NULL) + 1; /* 1 second */
           /* TODO trying to find a portable way to use ms|µs so "dropevents" becomes unneeded*/
       } else
@@ -1017,8 +1019,7 @@ int main( int argc, char **argv)
         read( fileno( stdin ), &c, 1 );
         char_handle( c );
       }
-      /** another select for timing purposes, termninal input code goes here, 
-      not used within daemon*/
+      /** another select for timing purposes,*/
     }
     else /*daemonized*/
     { 
