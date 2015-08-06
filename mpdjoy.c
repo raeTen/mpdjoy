@@ -199,8 +199,8 @@ static int readconf() {
   char lbuffer[MAX_CA_LEN];
   //there were changes in libconfig, so change this (and both lines downwards)
   //according to what libconfig.h treats within config_setting_lookup_int()
-  ///long int number;
-  int number;
+  long int number;
+  ///int number;
   config_init( &cfg );
   if ( ! config_read_file( &cfg, configfile) )
   {
@@ -274,8 +274,8 @@ static int readconf() {
            && config_setting_lookup_int( cbutton, "nr", &number) ) )
         continue;
       /*NOTE int or long int */
-      ///if ( DEBUG ) printf( "%-30s  %3ld\n", c_value, number ); //number is long int
-      if ( DEBUG ) printf( "%-30s  %3d\n", c_value, number );     //number is int
+      if ( DEBUG ) printf( "%-30s  %3ld\n", c_value, number ); //number is long int
+      ///if ( DEBUG ) printf( "%-30s  %3d\n", c_value, number );     //number is int
       snprintf( lbuffer, MAX_CA_LEN, "%s", c_value );
       strcpy( jsbuttons[i].cfg_value, lbuffer );
       jsbuttons[i].number = number;
@@ -298,8 +298,8 @@ static int readconf() {
                     && config_setting_lookup_int( caxis, "nr",  &number) ) )
         continue;
       /*NOTE int or long int */
-      ///if ( DEBUG ) printf( "%-30s  %3ld\n", c_value, number ); //number is long int
-      if ( DEBUG ) printf( "%-30s  %3d\n", c_value, number );     //number is int
+      if ( DEBUG ) printf( "%-30s  %3ld\n", c_value, number ); //number is long int
+      ///if ( DEBUG ) printf( "%-30s  %3d\n", c_value, number );     //number is int
       snprintf( lbuffer, MAX_CA_LEN, "%s", c_value );
       strcpy( jsaxis[i].cfg_value, lbuffer );
       jsaxis[i].number = number;
