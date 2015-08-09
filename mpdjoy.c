@@ -17,13 +17,13 @@
 /*  0.9.2 supports playlists next/prev 			*/
 /* 							*/
 /*------------------------------------------------------*/
-/*------------------------------------------------------*/
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/select.h>
+#include <sys/time.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <asm/types.h>
@@ -44,14 +44,13 @@
 #define MPD_TIMEOUT 2000
 #define DEADZONE 1
 #define BUTTONZONE 10
-/** volume control----------------*/
+/** volume control */
 #define FIXED true 
 #define DYNAMIC false
 
 #define IDLE 300
 /** milliseconds | timer to poll input device driver----*/
-#define POLL 40 
-/* lower values will occupy cpu more often, "80" is a good value for nowadays SoCs */
+#define POLL 40 /*increase for less CPU usage*/
 
 #define MAX_CFG_ENTRIES  99
 #define MAX_PLAYLISTS_ENTRIES 255 /*entity list from server*/
@@ -72,13 +71,23 @@ uid_t uid;
 
 typedef struct {
     int number;
-    int norepeat;
+    int lastvalue;
+    int simplehash;
+    long long norepeat;
     char cfg_value[MAX_CA_LEN];
 } config_vals;
 
 config_vals jsbuttons[MAX_CFG_ENTRIES];
 config_vals jsaxis[MAX_CFG_ENTRIES];
 config_vals knownPlaylists[MAX_CFG_ENTRIES];
+
+typedef struct {
+    int lastaxis;
+    int lastaxisval;
+    int lastbutton;
+    int actaxis;
+} js_prop;
+js_prop jsprop[1];
 
 /*******************************/
 /* mpd state definition */
@@ -125,13 +134,12 @@ uint            userplaylists = 0;
 uint            serverplaylists = 0;
 int			    directvolume = 0;
 int 			anim_cnt=0;
-int 			dropevents=0;
+
 char 			statusline[300];
 char 			obuffer[300]; /*one line formatted output*/
 uint			polltime = POLL;
 uint			pollcnt = 0;
 int			    relative_position = 0;
-int             lastAux = 0;
 int             actPlaylist = 0;
 /**signal handling ,logging*/
 uint    		verbosity = 0;
@@ -191,6 +199,18 @@ void setsignal( void )
   signal(SIGUSR2, SIG_IGN);
 }
 
+static int simplehash( char *val )
+{
+  int cnt = 0;
+  int rv = 0;
+
+  for ( cnt=0; cnt < strlen ( val ); cnt++ )
+  {
+      rv = rv + val[cnt];
+  }
+  return rv + cnt;
+}
+
 static int readconf() {
   config_t cfg;
   config_setting_t *setting;
@@ -239,7 +259,6 @@ static int readconf() {
     daemongroup = 0;
   
   /** Known PLaylists */
-  /* Output a list of all configured playlists */
   setting = config_lookup(&cfg, "knownPlaylists");
   if( setting != NULL )
   {
@@ -253,13 +272,13 @@ static int readconf() {
       snprintf( lbuffer, MAX_CA_LEN, "%s", c_value );
       strcpy( knownPlaylists[userplaylists].cfg_value, lbuffer );
       knownPlaylists[userplaylists].number = userplaylists;
-      knownPlaylists[userplaylists].norepeat = false;
+      knownPlaylists[userplaylists].norepeat = 0;
+      knownPlaylists[userplaylists].lastvalue = false;
+      knownPlaylists[userplaylists].simplehash = false;
       userplaylists++; 
     }
-
   }
   /** Buttons config */
-  /* Output a list of all configured buttons */
   setting = config_lookup(&cfg, "joystick.buttons");
   if( setting != NULL )
   {
@@ -279,7 +298,9 @@ static int readconf() {
       snprintf( lbuffer, MAX_CA_LEN, "%s", c_value );
       strcpy( jsbuttons[i].cfg_value, lbuffer );
       jsbuttons[i].number = number;
-      jsbuttons[i].norepeat = false;
+      jsbuttons[i].norepeat = 0;
+      jsbuttons[i].lastvalue = false;
+      jsbuttons[i].simplehash = simplehash(jsbuttons[i].cfg_value);
       i++;
     }
     userbuttons = count;
@@ -303,7 +324,9 @@ static int readconf() {
       snprintf( lbuffer, MAX_CA_LEN, "%s", c_value );
       strcpy( jsaxis[i].cfg_value, lbuffer );
       jsaxis[i].number = number;
-      jsaxis[i].norepeat = false;
+      jsaxis[i].norepeat = 0;
+      jsaxis[i].lastvalue = false;
+      jsaxis[i].simplehash = simplehash(jsaxis[i].cfg_value);
       i++;
     }
     useraxis = count;
@@ -361,15 +384,14 @@ static int animate(int status) {
   }
   return 0;
 }
-/**  MPD CLIENT functions ---*/
+/**  MPD CLIENT ---*/
 static void fail( const char *errstr, ... )
 {
   va_list ap;
   va_start( ap,  errstr ); 
   vfprintf( stderr, errstr, ap );
   va_end( ap );
-  //exit( EXIT_FAILURE );
-  running = false; /*otherwise ntty settings would not be resetted */
+  running = false;
 
 }
 
@@ -408,10 +430,7 @@ static int mpd_init( void )
 
 void mpd_seek( int seekto )
 {
-  //NOTE if seeking fails (with other clients, too), there might be a bug in mpd itself
-  //or in conjunction with snd-LKMs. I 've issues with that on a cubie (sunxi...)
   int setto = mpd->state.totalTime * seekto / 100;
-  dropevents = 2;
   mpd_run_seek_id( mpd->connection, mpd->state.songid, setto );
 }
 
@@ -419,30 +438,27 @@ static bool mpd_status(bool eventdriven)
 {
   if ( ( daemonize ) && ( ! eventdriven ) )
     return true;
-  //if ( mpd->status )
-    //mpd_status_free( mpd->status );
-    if ( ( mpd->status = mpd_run_status( mpd->connection ) ) )
-    {
-      mpd->state.id = mpd_status_get_update_id( mpd->status );
-      mpd->state.songid = mpd_status_get_song_id( mpd->status );
-      mpd->state.volume = mpd_status_get_volume( mpd->status );
-      mpd->state.crossfade = mpd_status_get_crossfade( mpd->status );
-      mpd->state.queuever = mpd_status_get_queue_version( mpd->status );
-      mpd->state.queuelen = mpd_status_get_queue_length( mpd->status );
-      mpd->state.elapsed = mpd_status_get_elapsed_time( mpd->status );
-      mpd->state.totalTime=mpd_status_get_total_time( mpd->status );
-      mpd->state.duration = mpd_status_get_total_time( mpd->status );
-
-      mpd->state.state = mpd_status_get_state( mpd->status );      
-      mpd->song = mpd_run_current_song( mpd->connection );
-      if ( mpd->state.songid == -1 ) return false; else return true;
-    }
-    else
-    {
-      mpd_quit();
-      isconnected = mpd_init();
-      return true;
-    }
+  if ( ( mpd->status = mpd_run_status( mpd->connection ) ) )
+  {
+    mpd->state.id = mpd_status_get_update_id( mpd->status );
+    mpd->state.songid = mpd_status_get_song_id( mpd->status );
+    mpd->state.volume = mpd_status_get_volume( mpd->status );
+    mpd->state.crossfade = mpd_status_get_crossfade( mpd->status );
+    mpd->state.queuever = mpd_status_get_queue_version( mpd->status );
+    mpd->state.queuelen = mpd_status_get_queue_length( mpd->status );
+    mpd->state.elapsed = mpd_status_get_elapsed_time( mpd->status );
+    mpd->state.totalTime=mpd_status_get_total_time( mpd->status );
+    mpd->state.duration = mpd_status_get_total_time( mpd->status );
+    mpd->state.state = mpd_status_get_state( mpd->status );
+    mpd->song = mpd_run_current_song( mpd->connection );
+    if ( mpd->state.songid == -1 ) return false; else return true;
+  }
+  else
+  {
+    mpd_quit();
+    isconnected = mpd_init();
+    return true;
+  }
   return true;
 }
 
@@ -477,7 +493,9 @@ int get_host_playlists( void )
       snprintf( lbuffer, MAX_CA_LEN, "%s", mpd_playlist_get_path( tplaylist ) );
       strcpy( knownPlaylists[i].cfg_value, lbuffer );
       knownPlaylists[i].number = i;
-      knownPlaylists[i].norepeat = false;
+      knownPlaylists[i].norepeat = 0;
+      knownPlaylists[i].lastvalue = false;
+      knownPlaylists[i].simplehash = false;
       userplaylists = i;
       i++;
     }
@@ -487,7 +505,6 @@ int get_host_playlists( void )
 
 int checkPlaylists ( void )
 {
-  /*using config or playlists from host*/
   switch ( userplaylists )
   {
       case 0:
@@ -496,7 +513,7 @@ int checkPlaylists ( void )
           useServerlist = get_host_playlists();
           break;
       default:
-          /*using the knownPlaylists from config*/
+          /*from config*/
           break;
   }
   snprintf( firstPlaylist, MAX_CA_LEN, "%s", knownPlaylists[0].cfg_value );
@@ -618,18 +635,6 @@ int get_pad_event( int fd )
   return -1;
 }
 
-static int simplehash( char *val )
-{
-  int cnt = 0;
-  int rv = 0;
-
-  for ( cnt=0; cnt < strlen ( val ); cnt++ ) 
-  {
-      rv = rv + val[cnt];
-  }
-  return rv + cnt;
-}
-
 static int setvol( int setval, bool fixed ) 
 {
   int vol;
@@ -661,13 +666,10 @@ static void mpd_functions( int funccode, int aux)
   if ( db)
     printf( "\ncode=%d aux=%d\n", 
            funccode, aux ); /* throws hashes for (other new) funccode */
-  if ( lastAux != funccode+aux )
+  if (true)
   {
-    lastAux=funccode+aux;
-
     if ( aux == BUTTONZONE || aux == -BUTTONZONE )
     {
-       lastAux = false;
        mpd_status( daemonize ); /**event driven status*/
        if ( daemonize ) set_mpd_relative_position(); /** event driven while daemonized */
         switch( funccode ) //hashed functions
@@ -707,32 +709,27 @@ static void mpd_functions( int funccode, int aux)
             setvol( (1376-funccode), FIXED);
             break;
           case 472: /** seek+ */
-            if ( dropevents ) break;
             relative_position = relative_position + 3;
             mpd_seek(relative_position);
             break;
           case 474: /** seek- */
-            if ( dropevents ) break;
             relative_position = relative_position - 3;
             mpd_seek( relative_position );
             break;
           /** seek_plusX */
           case 1030: case 1031: case 1032: case 1033: case 1034: case 1035: case 1036: case 1037: case 1038:
-            if ( dropevents ) break;
             relative_position = relative_position + (-(1029-funccode));
             mpd_seek( relative_position );
             break;
           /** seek_minusX */
           case 1135: case 1136: case 1137: case 1138: case 1139: case 1140: case 1141: case 1142: case 1143:
-            if ( dropevents ) break;
             relative_position = relative_position + (1134-funccode);
             mpd_seek( relative_position );
             break;
         }
       }
-      if ( ( aux >= DEADZONE || aux <= -DEADZONE ) && ( aux < BUTTONZONE || aux > -BUTTONZONE ) )
+      if ( ( aux >= DEADZONE || aux <= -DEADZONE ) )
       {
-        lastAux = false;
         mpd_status( daemonize ); /**event driven status*/
         if ( daemonize ) set_mpd_relative_position(); /** event driven while daemonized */
         switch ( funccode ) {
@@ -768,7 +765,7 @@ static void mpd_functions( int funccode, int aux)
 
             break;
           case 518: /** seek+- */
-            relative_position = relative_position + aux;
+            relative_position = relative_position + ( aux / 2);
             mpd_seek( relative_position );
             break;
           case 552: /** !seek+- */
@@ -790,6 +787,13 @@ static void mpd_functions( int funccode, int aux)
   }
 }
 
+long long mtimestamp() {
+    struct timeval ts;
+    gettimeofday(&ts, NULL);
+    long long ms = ts.tv_sec*1000LL + ts.tv_usec / 1000;
+    return ms;
+}
+
 int button_action( int button )
 {
   int cnt;
@@ -797,16 +801,10 @@ int button_action( int button )
   {
     if ( jsbuttons[cnt].number == button )
     {
-      if  ( jsbuttons[cnt].norepeat <= (int)time(NULL) )
+      if  ( jsbuttons[cnt].norepeat <= ((long long)mtimestamp()) )
       {
-        mpd_functions( simplehash( jsbuttons[cnt].cfg_value), BUTTONZONE );
-      
-        if ( ( strstr( jsbuttons[cnt].cfg_value, "next" ) ) || 
-             ( strstr( jsbuttons[cnt].cfg_value, "prev" ) ) ||
-             ( strstr( jsbuttons[cnt].cfg_value, "pause" ) ) )
-          /*repeat with decay*/
-          jsbuttons[cnt].norepeat = (int)time(NULL) + 1; /* 1 second */
-          /* TODO trying to find a portable way to use ms|µs so "dropevents" becomes unneeded*/
+        mpd_functions( jsbuttons[cnt].simplehash, BUTTONZONE );
+        jsbuttons[cnt].norepeat = (long long)mtimestamp() + 250; /* 200ms no repeat */
       } else
       {
         break;
@@ -823,9 +821,20 @@ int axis_action( int axis, int axisval )
   int cnt;
   for ( cnt=0; cnt < useraxis; cnt++ ) 
   {
-    if ( jsaxis[cnt].number == axis) 
+    if  ( jsaxis[cnt].number == axis) 
     {
-      mpd_functions( simplehash( jsaxis[cnt].cfg_value ), axisval );
+      if ( jsaxis[cnt].norepeat <= ((long long)mtimestamp()) )
+      {
+        mpd_functions( jsaxis[cnt].simplehash, axisval );
+        if ( ! ( strstr( jsaxis[cnt].cfg_value, "direct" ) ) )
+        {
+        jsaxis[cnt].norepeat = (long long)mtimestamp() + 250; /* 500ms repeat off */
+        }
+      } else
+      {
+        break;
+        return 0;
+      }
       break; /* rof*/
     }
   }
@@ -842,7 +851,6 @@ static int setpolltime( int jsevent, int lastaxisval )
       return POLL;
     }
   }
-  //if ( lastaxisval ) return POLL;
   if ( jsevent > -1 ) 
   {
     pollcnt = 0;
@@ -866,7 +874,7 @@ static int setpolltime( int jsevent, int lastaxisval )
   }
   return IDLE;
 }
-/** useless within daemon -*/
+
 static int char_handle( c )
 {
   switch ( c ) {
@@ -886,7 +894,7 @@ static int char_handle( c )
   }
   return 0;
 }
-/** config structs --*/
+/** parameters */
 static struct option const long_options[] = 
 {
 	{"configfile",		required_argument,	NULL, 'c'},
@@ -898,14 +906,41 @@ static struct option const long_options[] =
 
 static char short_options[] = "c:df:h";
 
+int eventhandler(int jsevent)
+{
+  if ( jsevent >  -1 )
+      {
+        if (jsevent < 99 )
+        {
+          jsprop[0].lastbutton = jsevent;
+          button_action( jsevent );
+        }
+        if ( jsevent > 99 )
+        {
+          jsprop[0].lastaxis = ( jsevent/100 ) - 1;
+          jsprop[0].lastaxisval = (jsevent - jsevent/100*100 ) - 9.5;
+          jsprop[0].actaxis = jsprop[0].lastaxis;
+          axis_action( jsprop[0].actaxis, jsprop[0].lastaxisval);
+        }
+      }
+      else
+      {
+        /*repeats without event */
+        if ( ! ( strstr( jsaxis[jsprop[0].lastaxis].cfg_value, "direct" ) ) )
+        {
+          if (  jsprop[0].lastaxisval != 0 )
+          {
+            axis_action( jsprop[0].lastaxis, jsprop[0].lastaxisval);
+          }
+        }
+      }
+  return jsevent;
+}
 /** -----------------------    MAIN  ------------------------------*/
 int main( int argc, char **argv) 
 {
   int fd;
   int jsevent = -1;
-  int lastbutton = 0;
-  int lastaxis = 0, actaxis = 0, lastaxisval = 0;
-  int timediv = 0;
   int option_index, j, mfork;
   bool loadedPlaylist = false;
   struct winsize ws;
@@ -1012,7 +1047,6 @@ int main( int argc, char **argv)
       FD_ZERO( &set );
       FD_SET( fileno( stdin ), &set );
       int res = select( fileno( stdin )+1, &set, NULL, NULL, &timevalue );
-      timediv++;
       if( res > 0 )
       {
         char c;
@@ -1024,16 +1058,7 @@ int main( int argc, char **argv)
     else /*daemonized*/
     { 
         select(0, NULL, NULL, NULL, &timevalue);
-        timediv++;
     }
-    if ( timediv > 1 )
-    {
-      timediv = 0;
-      dropevents--; 
-      if ( dropevents <= 0 )
-        dropevents = 0;
-    }
-
     /**(re)connected & updated status*/
     loadedPlaylist = ( mpd_status( false ));
     if ( isconnected )
@@ -1048,12 +1073,13 @@ int main( int argc, char **argv)
           char truncated[30];
           snprintf( truncated, 25 , "%s", statusline );
           snprintf( obuffer, ws.ws_col,
-                     "%s Last Button:%d Last Axis:%d(%d) [%d|%d|%d|%d] %d                                   ",
-                     truncated,lastbutton,lastaxis,lastaxisval,pollcnt,dropevents,timediv,jsevent,actPlaylist);
+                     "%s Last Button:%d Last Axis:%d(%d) [%d|%d] %d                                   ",
+                     truncated, jsprop[0].lastbutton ,jsprop[0].lastaxis,
+                     jsprop[0].lastaxisval, pollcnt, jsevent, actPlaylist);
         } else
         {
           snprintf( obuffer, ws.ws_col, "%s Last Button:%d Last Axis:%d(%d)",
-                   statusline, lastbutton, lastaxis, lastaxisval );
+                   statusline, jsprop[0].lastbutton, jsprop[0].lastaxis, jsprop[0].lastaxisval );
         /** TODO add whitespace to obuffer according to ws_col (terminal length size) */
         }
         printf( "\r%s", obuffer );
@@ -1073,29 +1099,8 @@ int main( int argc, char **argv)
         forcePlaying = false;
       }
       /** pad handling*/
-      ///if ( lastaxisval && !dropevents )
-      if ( actaxis && !dropevents )
-      {
-        axis_action( actaxis, lastaxisval);
-        actaxis = false;
-        dropevents = 2;
-      }
-      jsevent = get_pad_event(fd);
-      polltime = setpolltime(jsevent,lastaxisval);
-      if ( jsevent >  -1 )
-      {
-        if (jsevent < 99 )
-        {
-          lastbutton = jsevent;
-          button_action( jsevent );
-        }
-        if ( jsevent > 99 )
-        {
-          lastaxisval = (jsevent - jsevent/100*100 ) - 9.5;
-          lastaxis = ( jsevent/100 ) - 1;
-          actaxis = lastaxis;
-        }
-      }
+      jsevent = eventhandler ( get_pad_event(fd) );
+      polltime = setpolltime(jsevent , jsprop[0].lastaxisval);
     } /** <- init and connection ok */
     else
     {
