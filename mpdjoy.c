@@ -219,8 +219,8 @@ static int readconf() {
   char lbuffer[MAX_CA_LEN];
   //there were changes in libconfig, so change this (and both lines downwards)
   //according to what libconfig.h treats within config_setting_lookup_int()
-  long int number;
-  ///int number;
+  ///long int number;
+  int number;
   config_init( &cfg );
   if ( ! config_read_file( &cfg, configfile) )
   {
@@ -293,8 +293,8 @@ static int readconf() {
            && config_setting_lookup_int( cbutton, "nr", &number) ) )
         continue;
       /*NOTE int or long int */
-      if ( DEBUG ) printf( "%-30s  %3ld\n", c_value, number ); //number is long int
-      ///if ( DEBUG ) printf( "%-30s  %3d\n", c_value, number );     //number is int
+      ///if ( DEBUG ) printf( "%-30s  %3ld\n", c_value, number ); //number is long int
+      if ( DEBUG ) printf( "%-30s  %3d\n", c_value, number );     //number is int
       snprintf( lbuffer, MAX_CA_LEN, "%s", c_value );
       strcpy( jsbuttons[i].cfg_value, lbuffer );
       jsbuttons[i].number = number;
@@ -319,8 +319,8 @@ static int readconf() {
                     && config_setting_lookup_int( caxis, "nr",  &number) ) )
         continue;
       /*NOTE int or long int */
-      if ( DEBUG ) printf( "%-30s  %3ld\n", c_value, number ); //number is long int
-      ///if ( DEBUG ) printf( "%-30s  %3d\n", c_value, number );     //number is int
+      ///if ( DEBUG ) printf( "%-30s  %3ld\n", c_value, number ); //number is long int
+      if ( DEBUG ) printf( "%-30s  %3d\n", c_value, number );     //number is int
       snprintf( lbuffer, MAX_CA_LEN, "%s", c_value );
       strcpy( jsaxis[i].cfg_value, lbuffer );
       jsaxis[i].number = number;
@@ -659,6 +659,15 @@ static int setdirectvol( int setval )
   mpd_send_set_volume( mpd->connection, vol );
   return 1;
 }
+static int set_seek_pos(int aux)
+{
+  if ( ( aux > 1 ) || ( aux < -1)  )
+  {
+    relative_position = relative_position + (aux/2) ;
+    mpd_seek( relative_position );
+  }
+  return true;
+}
 
 static void mpd_functions( int funccode, int aux) 
 {
@@ -765,10 +774,10 @@ static void mpd_functions( int funccode, int aux)
 
             break;
           case 518: /** seek+- */
-            relative_position = relative_position + ( aux / 2);
-            mpd_seek( relative_position );
+            set_seek_pos(aux);
             break;
           case 552: /** !seek+- */
+            set_seek_pos(aux);
             break;
         }
       }
@@ -819,6 +828,7 @@ int button_action( int button )
 int axis_action( int axis, int axisval )
 {
   int cnt;
+  
   for ( cnt=0; cnt < useraxis; cnt++ ) 
   {
     if  ( jsaxis[cnt].number == axis) 
@@ -828,7 +838,11 @@ int axis_action( int axis, int axisval )
         mpd_functions( jsaxis[cnt].simplehash, axisval );
         if ( ! ( strstr( jsaxis[cnt].cfg_value, "direct" ) ) )
         {
-        jsaxis[cnt].norepeat = (long long)mtimestamp() + 250; /* 500ms repeat off */
+        //TODO different values for each function
+        if ( ! ( strstr( jsaxis[jsprop[0].lastaxis].cfg_value, "seek" ) ) )
+          jsaxis[cnt].norepeat = (long long)mtimestamp() + 500; /* 500ms repeat off */
+        else
+          jsaxis[cnt].norepeat = (long long)mtimestamp() + 250; /* +ms repeat off */
         }
       } else
       {
