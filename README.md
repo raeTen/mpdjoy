@@ -22,24 +22,26 @@ If the compiler complains about int/long int within config_setting_lookup_int,
 re-comment out/in the 3 marked lines to what your system libconfig treats.
 long int should fit the most cases.
 see line 201 276 300
-gcc will just give a "Warning", but the prg cannot work than.
-It never has been a good idea to ignore any -Wall output.
+gcc will just give a "Warning", but the prg wont work with these warnings.
+It never has been a good idea to ignore any -Wall output in general.
 
 ## Why
-I just wanted to have buttons for my fingers to handle mpd - music
+I just wanted to have wired´ buttons for my fingers to handle music
 because my SoC-Board doesn't have video output at all.
-Of course I've a IR-remote solution, too, but sometimes a local
-hid is very much cushier :)
+Of course I've got a IR-remote solution, too, but sometimes a local
+HID is very much cushier :)
 There are many ways to reach something like that, e.g. let some
-"hotkeying" to the mpc the things etc.pp
+"hotkeying" to do the mpc the things etc. pp.
 What I missed, is to have a analog-like volume setting adjuster.
-With "volumedirect" I use the throttle potentiometer for that.
-The "client" output may be dropped, so the LOC will decrease
-about the half, but I wanted to experiment with libmpdclient, too.
+With "volumedirect" I use any throttle potentiometer for that.
+
+Dropping the client output code may crunsh the whole thing to half
+size, but I think it's smart enough in all as is.
 
 ## Another Why
 I'm building up a "MPD"-Hardware-Frontpanel with a lot of
 buttons and paddles + "jogshuttle" + Volume-adjuster.
+Things we already know and like as user.
 The prototype contains a usb-dac/adc interface from a "cheap" pad.
 Later on that'll be a project with an atmel and some "more" hw controls
 
