@@ -2,7 +2,7 @@
 
 ## About
 mpdjoy controls your MPD-host by any linux driven joystick/pad.
-0.9.2 is alpha-state for now, and should do what I wanted,
+0.9.3 is alpha-state for now, and should do what I wanted,
 
 
 It's just a small etude to tinker around libmpd libconfig
@@ -36,6 +36,12 @@ What I missed, is to have a analog-like volume setting adjuster.
 With "volumedirect" I use the throttle potentiometer for that.
 The "client" output may be dropped, so the LOC will decrease
 about the half, but I wanted to experiment with libmpdclient, too.
+
+## Another Why
+I'm building up a "MPD"-Hardware-Frontpanel with a lot of
+buttons and paddles + "jogshuttle" + Volume-adjuster.
+The prototype contains a usb-dac/adc interface from a "cheap" pad.
+Later on that'll be a project with an atmel and some "more" hw controls
 
 ## What it does
 mpdjoy will read its configuration file which is
